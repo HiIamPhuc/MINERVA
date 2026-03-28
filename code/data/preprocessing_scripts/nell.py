@@ -89,7 +89,7 @@ with open(output_dir+'/test.txt', 'w') as out_file:
         for line in raw_file:
 
             if line.strip()[-1] == '+':
-                print "here"
+                print("here")
                 ee = line.strip()[:-3]
                 e1, e2 = ee.split(',')
                 # import pdb

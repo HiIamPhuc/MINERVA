@@ -1,6 +1,6 @@
 from __future__ import division
 from __future__ import absolute_import
-import tensorflow as tf
+import torch
 
 
 class baseline(object):
@@ -13,8 +13,12 @@ class baseline(object):
 class ReactiveBaseline(baseline):
     def __init__(self, l):
         self.l = l
-        self.b = tf.Variable( 0.0, trainable=False)
+        self.b = 0.0
+
     def get_baseline_value(self):
         return self.b
+
     def update(self, target):
-        self.b = tf.add((1-self.l)*self.b, self.l*target)
+        if isinstance(target, torch.Tensor):
+            target = float(target.detach().item())
+        self.b = (1 - self.l) * self.b + self.l * float(target)
