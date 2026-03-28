@@ -17,7 +17,7 @@ import resource
 import sys
 from code.model.baseline import ReactiveBaseline
 from code.model.nell_eval import nell_eval
-from scipy.misc import logsumexp as lse
+from scipy.special import logsumexp as lse
 
 logger = logging.getLogger()
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
