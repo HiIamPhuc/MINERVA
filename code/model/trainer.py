@@ -179,7 +179,7 @@ class Trainer(object):
 
                 per_example_loss.append(loss_t)
                 per_example_logits.append(logits_t)
-                prev_relation = idx_t.new_tensor(next_relations[range_arr, idx_t])
+                prev_relation = next_relations[range_arr, idx_t].long()
 
                 state = episode(idx_t.detach().cpu().numpy())
 
