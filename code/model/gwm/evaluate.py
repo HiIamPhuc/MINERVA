@@ -58,7 +58,12 @@ def evaluate(args):
     
     if os.path.exists(checkpoint_path):
         print(f"Loading checkpoint: {checkpoint_path}")
-        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        if isinstance(checkpoint, dict):
+            state_dict = checkpoint.get('state_dict', checkpoint.get('model_state_dict', checkpoint))
+        else:
+            state_dict = checkpoint
+        model.load_state_dict(state_dict, strict=False)
     else:
         print("No checkpoint found. Evaluating initialized model (random).")
 

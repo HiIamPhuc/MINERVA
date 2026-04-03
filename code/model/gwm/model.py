@@ -61,6 +61,7 @@ class GWM(nn.Module):
         self.cached_entity_text_emb = None
         self.cached_relation_text_emb = None
         self.use_text_cache = False
+        self._cached_all_entity_targets = None
         
     def _encode_text(self, input_ids, attention_mask):
         if self.text_encoder is None:
@@ -188,6 +189,41 @@ class GWM(nn.Module):
         scores /= getattr(self.config, 'temperature', 0.07)
         labels = torch.arange(scores.size(0), device=scores.device)
         return nn.CrossEntropyLoss()(scores, labels), scores
+
+    def _get_all_entity_targets(self, device):
+        if self._cached_all_entity_targets is not None and self._cached_all_entity_targets.device == device:
+            return self._cached_all_entity_targets
+
+        with torch.no_grad():
+            entity_ids = torch.arange(self.entity_embeddings.num_embeddings, device=device, dtype=torch.long)
+            targets = self.encode_target({'id': entity_ids})
+            self._cached_all_entity_targets = targets
+        return self._cached_all_entity_targets
+
+    def predict_latent_jumps(self, current_entities, query_relations, k=3):
+        if not self.use_text_cache:
+            raise RuntimeError("Text cache is not built. Call build_text_embedding_cache first.")
+
+        device = next(self.parameters()).device
+        with torch.no_grad():
+            curr = torch.as_tensor(current_entities, dtype=torch.long, device=device)
+            rel = torch.as_tensor(query_relations, dtype=torch.long, device=device)
+
+            curr = curr.clamp(min=0, max=self.entity_embeddings.num_embeddings - 1)
+            rel = rel.clamp(min=0, max=self.relation_embeddings.num_embeddings - 1)
+
+            q = self({'id': curr}, {'id': rel})
+            all_entities = self._get_all_entity_targets(device)
+            scores = torch.matmul(q, all_entities.t())
+
+            topk = min(int(k), all_entities.size(0))
+            _, topk_ids = torch.topk(scores, k=topk, dim=1)
+
+            if topk < int(k):
+                pad_col = topk_ids[:, -1:].repeat(1, int(k) - topk)
+                topk_ids = torch.cat([topk_ids, pad_col], dim=1)
+
+            return topk_ids.cpu().numpy()
 
     @classmethod
     def load_from_checkpoint(cls, checkpoint_path):

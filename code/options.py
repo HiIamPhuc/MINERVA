@@ -42,6 +42,7 @@ def read_options():
         parser.error(str(msg))
 
     parsed['model_dir'] = parsed['output_dir'] + '/' + 'model/'
+    parsed['path_logger_file'] = parsed['output_dir']
     parsed['log_file_name'] = parsed['output_dir'] +'/log.txt'
 
     os.makedirs(parsed['output_dir'], exist_ok=True)

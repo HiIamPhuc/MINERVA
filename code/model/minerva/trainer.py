@@ -16,7 +16,7 @@ from scipy.special import logsumexp as lse
 
 
 from MINERVA.code.model.minerva.agent import Agent
-from code.options import read_options
+from MINERVA.code.options import read_options
 from MINERVA.code.model.minerva.environment import Environment
 from MINERVA.code.model.minerva.baseline import ReactiveBaseline
 from MINERVA.code.model.minerva.nell_eval import nell_eval
@@ -171,7 +171,7 @@ class Trainer(object):
                 with open(self.output_dir + "/scores.txt", "a") as score_file:
                     score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
 
-                os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
+                os.makedirs(self.path_logger_file + "/" + str(self.batch_counter), exist_ok=True)
                 self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
 
                 self.test(beam=True, print_paths=False)
@@ -468,7 +468,7 @@ if __name__ == "__main__":
     
     test_trainer.test_rollouts = 100
 
-    os.mkdir(path_logger_file + "/" + "test_beam")
+    os.makedirs(path_logger_file + "/" + "test_beam", exist_ok=True)
     test_trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
     with open(output_dir + "/scores.txt", "a") as score_file:
         score_file.write("Test (beam) scores with best model from " + str(save_path) + "\n")
