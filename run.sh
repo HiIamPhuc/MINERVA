@@ -33,7 +33,6 @@ require_var use_entity_embeddings
 require_var train_entity_embeddings
 require_var train_relation_embeddings
 require_var data_input_dir
-require_var vocab_dir
 require_var model_load_dir
 require_var load_model
 require_var total_iterations
