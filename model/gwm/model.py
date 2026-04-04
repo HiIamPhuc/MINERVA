@@ -132,13 +132,13 @@ class GWM(nn.Module):
             raise RuntimeError("Text cache is not built. Call load_precomputed_text_embedding_cache first.")
 
         original_shape = ids.shape
-        flat_ids = ids.view(-1)
+        flat_ids = ids.reshape(-1)
         if flat_ids.device != cache.device:
             flat_ids = flat_ids.to(cache.device)
         selected = cache.index_select(0, flat_ids)
         if selected.device != ids.device:
             selected = selected.to(ids.device)
-        return selected.view(*original_shape, -1)
+        return selected.reshape(*original_shape, -1)
 
     def _project_structural(self, struct_emb):
         if self.structural_projection is not None:

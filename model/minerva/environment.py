@@ -72,8 +72,8 @@ class Episode(object):
                     cache_device = cache.device
                     curr_ids = curr_ent_safe.to(cache_device)
                     end_ids = end_ent_safe.to(cache_device)
-                    curr_emb = cache.index_select(0, curr_ids.view(-1)).view(*curr_ids.shape, -1).to(device)
-                    end_emb = cache.index_select(0, end_ids.view(-1)).view(*end_ids.shape, -1).to(device)
+                    curr_emb = cache.index_select(0, curr_ids.reshape(-1)).reshape(*curr_ids.shape, -1).to(device)
+                    end_emb = cache.index_select(0, end_ids.reshape(-1)).reshape(*end_ids.shape, -1).to(device)
                     
                     # Cosine Similarity
                     curr_emb = torch.nn.functional.normalize(curr_emb, p=2, dim=-1)

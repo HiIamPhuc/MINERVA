@@ -83,11 +83,11 @@ class Agent(nn.Module):
         return fused_emb
 
     def _lookup_from_cache(self, cache_tensor, ids, target_device):
-        flat_ids = ids.view(-1)
+        flat_ids = ids.reshape(-1)
         if flat_ids.device != cache_tensor.device:
             flat_ids = flat_ids.to(cache_tensor.device)
         selected = cache_tensor.index_select(0, flat_ids)
-        selected = selected.view(*ids.shape, -1)
+        selected = selected.reshape(*ids.shape, -1)
         if selected.device != target_device:
             selected = selected.to(target_device)
         return selected
