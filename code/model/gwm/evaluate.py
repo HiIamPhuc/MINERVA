@@ -38,7 +38,10 @@ def evaluate(args):
     # Use conservative defaults for evaluation to avoid OOM on large configs.
     eval_batch_size = int(getattr(config, 'eval_batch_size', min(int(config.batch_size), 128)))
     candidate_batch_size = int(getattr(config, 'candidate_batch_size', min(eval_batch_size * 2, 256)))
-    text_cache_batch_size = int(getattr(config, 'text_cache_batch_size', 128))
+    default_cache_encode_device = 'cpu' if device.type == 'cuda' else device.type
+    text_cache_encode_device = str(getattr(config, 'text_cache_encode_device', default_cache_encode_device))
+    text_cache_store_device = str(getattr(config, 'text_cache_store_device', device.type))
+    text_cache_batch_size = int(getattr(config, 'text_cache_batch_size', 64 if text_cache_encode_device == 'cuda' else 256))
 
     # 1. Load Model
     print("Loading model...")
@@ -80,6 +83,8 @@ def evaluate(args):
         batch_size=text_cache_batch_size,
         max_entity_length=getattr(config, 'max_length', 512),
         max_relation_length=getattr(config, 'max_relation_length', 128),
+        encode_device=text_cache_encode_device,
+        cache_device=text_cache_store_device,
     )
     print("Text cache ready for evaluation.")
 

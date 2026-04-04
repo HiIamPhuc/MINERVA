@@ -83,15 +83,24 @@ def train(args):
     with open(os.path.join(config.data_dir, 'relation_text.json'), 'r') as f:
         relation_text_map = json.load(f)
 
-    cache_batch_size = int(getattr(config, 'text_cache_batch_size', 128))
-    print(f"Building text embedding cache with batch size {cache_batch_size}...")
+    default_cache_encode_device = 'cpu' if device.type == 'cuda' else device.type
+    text_cache_encode_device = str(getattr(config, 'text_cache_encode_device', default_cache_encode_device))
+    text_cache_store_device = str(getattr(config, 'text_cache_store_device', device.type))
+    cache_batch_size = int(getattr(config, 'text_cache_batch_size', 64 if text_cache_encode_device == 'cuda' else 256))
+
+    print(
+        "Building text embedding cache "
+        f"(encode_device={text_cache_encode_device}, store_device={text_cache_store_device}, batch_size={cache_batch_size})..."
+    )
     model.build_text_embedding_cache(
         entity_text_map=entity_text_map,
         relation_text_map=relation_text_map,
         device=device,
         batch_size=cache_batch_size,
         max_entity_length=getattr(config, 'max_length', 512),
-        max_relation_length=getattr(config, 'max_relation_length', 128)
+        max_relation_length=getattr(config, 'max_relation_length', 128),
+        encode_device=text_cache_encode_device,
+        cache_device=text_cache_store_device,
     )
     print("Text cache ready. Training uses ID-only batches.")
     
@@ -135,7 +144,7 @@ def train(args):
     best_mrr = 0.0
     
     early_stopping = EarlyStopping(
-        patience=getattr(config, 'early_stopping_patience', 10),
+        patience=getattr(config, 'early_stopping_patience', getattr(config, 'early_stopping', 10)),
         mode='max'  # Maximize MRR
     )
     
@@ -240,7 +249,14 @@ def train(args):
             
             if val_mrr > best_mrr:
                 best_mrr = val_mrr
-                torch.save(model.state_dict(), os.path.join(config.output_dir, 'best_checkpoint.pt'))
+                torch.save(
+                    {
+                        'config': vars(config),
+                        'state_dict': model.state_dict(),
+                        'best_mrr': best_mrr,
+                    },
+                    os.path.join(config.output_dir, 'best_checkpoint.pt')
+                )
             
             # Check early stopping
             if early_stopping(val_mrr):
@@ -261,7 +277,14 @@ def train(args):
                   json.dump(history, f, indent=2)
         
         # Save Checkpoint
-        torch.save(model.state_dict(), os.path.join(config.output_dir, 'latest_checkpoint.pt'))
+        torch.save(
+            {
+                'config': vars(config),
+                'state_dict': model.state_dict(),
+                'best_mrr': best_mrr,
+            },
+            os.path.join(config.output_dir, 'latest_checkpoint.pt')
+        )
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

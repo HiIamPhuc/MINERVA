@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import contextlib
 from transformers import AutoModel, AutoTokenizer
 
 class GWMConfig:
@@ -69,25 +70,70 @@ class GWM(nn.Module):
         outputs = self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)
         return outputs.last_hidden_state[:, 0, :] # [CLS] token
 
-    def build_text_embedding_cache(self, entity_text_map, relation_text_map, device, batch_size=128, max_entity_length=512, max_relation_length=128):
+    def build_text_embedding_cache(
+        self,
+        entity_text_map,
+        relation_text_map,
+        device,
+        batch_size=128,
+        max_entity_length=512,
+        max_relation_length=128,
+        encode_device=None,
+        cache_device=None,
+        autocast_text_encoder=True,
+    ):
         if self.use_text_cache and self.cached_entity_text_emb is not None and self.cached_relation_text_emb is not None:
             return
 
         if self.text_encoder is None:
             raise RuntimeError("Text encoder is not available and cache is missing.")
 
-        self.text_encoder.to(device)
+        runtime_device = torch.device(device)
+        encode_device = torch.device(encode_device) if encode_device is not None else runtime_device
+        cache_device = torch.device(cache_device) if cache_device is not None else runtime_device
+
+        self.text_encoder.to(encode_device)
+        if runtime_device.type == 'cuda' and encode_device.type != 'cuda' and torch.cuda.is_available():
+            torch.cuda.empty_cache()
         self.text_encoder.eval()
 
         def _encode_text_list(text_list, max_length):
             all_emb = []
-            with torch.no_grad():
-                for start in range(0, len(text_list), batch_size):
-                    chunk = text_list[start:start + batch_size]
-                    enc = self.tokenizer(chunk, padding=True, truncation=True, return_tensors='pt', max_length=max_length)
-                    enc = {k: v.to(device) for k, v in enc.items()}
-                    emb = self._encode_text(enc['input_ids'], enc['attention_mask'])
-                    all_emb.append(emb)
+            start = 0
+            effective_batch_size = max(1, int(batch_size))
+
+            with torch.inference_mode():
+                while start < len(text_list):
+                    end = min(start + effective_batch_size, len(text_list))
+                    chunk = text_list[start:end]
+
+                    try:
+                        enc = self.tokenizer(
+                            chunk,
+                            padding=True,
+                            truncation=True,
+                            return_tensors='pt',
+                            max_length=max_length,
+                        )
+                        enc = {k: v.to(encode_device) for k, v in enc.items()}
+
+                        use_autocast = encode_device.type == 'cuda' and autocast_text_encoder
+                        autocast_ctx = (
+                            torch.autocast(device_type='cuda', dtype=torch.float16)
+                            if use_autocast else contextlib.nullcontext()
+                        )
+
+                        with autocast_ctx:
+                            emb = self._encode_text(enc['input_ids'], enc['attention_mask'])
+
+                        all_emb.append(emb.to(cache_device, non_blocking=True).contiguous())
+                        start = end
+                    except torch.OutOfMemoryError:
+                        if encode_device.type != 'cuda' or effective_batch_size == 1:
+                            raise
+                        torch.cuda.empty_cache()
+                        effective_batch_size = max(1, effective_batch_size // 2)
+
             return torch.cat(all_emb, dim=0).contiguous()
 
         num_entities = self.entity_embeddings.num_embeddings
@@ -99,6 +145,7 @@ class GWM(nn.Module):
         self.cached_entity_text_emb = _encode_text_list(entity_texts, max_entity_length)
         self.cached_relation_text_emb = _encode_text_list(relation_texts, max_relation_length)
         self.use_text_cache = True
+        self._cached_all_entity_targets = None
 
         if getattr(self.config, 'drop_text_encoder_after_cache', True):
             self.text_encoder = None
@@ -112,7 +159,18 @@ class GWM(nn.Module):
 
         original_shape = ids.shape
         flat_ids = ids.view(-1)
+        if flat_ids.device != cache.device:
+            flat_ids = flat_ids.to(cache.device, non_blocking=True)
+
         selected = cache.index_select(0, flat_ids)
+
+        if selected.device != ids.device:
+            selected = selected.to(ids.device, non_blocking=True)
+
+        target_dtype = self.text_projection.weight.dtype
+        if selected.dtype != target_dtype:
+            selected = selected.to(dtype=target_dtype)
+
         return selected.view(*original_shape, -1)
 
     def _project_structural(self, struct_emb):
