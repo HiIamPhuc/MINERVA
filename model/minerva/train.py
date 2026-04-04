@@ -11,16 +11,20 @@ from collections import defaultdict
 import gc
 import resource
 from scipy.special import logsumexp as lse
-
 import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from agent import Agent
 from options import read_options
 from environment import Environment
 from baseline import ReactiveBaseline
 from nell_eval import nell_eval
-from ..gwm.model import GWM
+try:
+    from ..gwm.model import GWM
+except ImportError:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    from model.gwm.model import GWM
 
 
 class Trainer(object):
