@@ -154,19 +154,38 @@ class Trainer(object):
             train_loss = 0.98 * train_loss + 0.02 * batch_total_loss
             avg_reward = np.mean(rewards)
 
-            num_ep_correct = np.sum(rewards.reshape((self.batch_size, self.num_rollouts)).any(axis=1))
+            exact_rollout_success = (episode.current_entities == episode.end_entities)
+            exact_hit_rate = float(np.mean(exact_rollout_success))
+
+            soft_rollout_success = (rewards > self.negative_reward)
+            soft_hit_rate = float(np.mean(soft_rollout_success))
+
+            exact_ep_correct = int(np.sum(exact_rollout_success.reshape((self.batch_size, self.num_rollouts)).any(axis=1)))
+            soft_ep_correct = int(np.sum(soft_rollout_success.reshape((self.batch_size, self.num_rollouts)).any(axis=1)))
 
             if np.isnan(train_loss):
                 raise ArithmeticError("Error in computing loss")
 
+            remaining_steps = max(self.total_steps - self.batch_counter, 0)
+            progress_pct = 100.0 * self.batch_counter / max(self.total_steps, 1)
+
             print(
-                "batch_counter: {0:4d}, num_hits: {1:7.4f}, avg. reward per batch {2:7.4f}, "
-                "num_ep_correct {3:4d}, avg_ep_correct {4:7.4f}, train loss {5:7.4f}".format(
+                "step {0:4d}/{1:4d} ({2:6.2f}%), remaining {3:4d}, "
+                "num_hits: {4:7.4f}, avg. reward per batch {5:7.4f}, "
+                "exact_hit_rate {6:7.4f}, soft_hit_rate {7:7.4f}, "
+                "exact_ep_correct {8:4d}, soft_ep_correct {9:4d}, "
+                "avg_soft_ep_correct {10:7.4f}, train loss {11:7.4f}".format(
                     self.batch_counter,
+                    self.total_steps,
+                    progress_pct,
+                    remaining_steps,
                     np.sum(rewards),
                     avg_reward,
-                    num_ep_correct,
-                    (num_ep_correct / self.batch_size),
+                    exact_hit_rate,
+                    soft_hit_rate,
+                    exact_ep_correct,
+                    soft_ep_correct,
+                    (soft_ep_correct / self.batch_size),
                     train_loss,
                 )
             )
