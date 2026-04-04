@@ -84,6 +84,7 @@ def train(args):
         relation_text_map = json.load(f)
 
     cache_batch_size = int(getattr(config, 'text_cache_batch_size', 128))
+    print(f"Building text embedding cache with batch size {cache_batch_size}...")
     model.build_text_embedding_cache(
         entity_text_map=entity_text_map,
         relation_text_map=relation_text_map,
