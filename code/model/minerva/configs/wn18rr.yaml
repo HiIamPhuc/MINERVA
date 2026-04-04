@@ -1,0 +1,33 @@
+# MINERVA + GWM integration config
+
+data_dir: ""
+output_dir: ""
+log_dir: "./logs"
+
+gwm_model_path: ""
+hallucinate_k: 3
+gwm_text_cache_device: "cpu"
+
+max_actions: 400
+path_length: 3
+total_steps: 2000
+batch_size: 128
+num_rollouts: 20
+test_rollouts: 100
+
+hidden_size: 50
+num_lstm_layers: 1
+
+learning_rate: 0.001
+grad_clip_norm: 5
+l2_reg_const: 0.01
+entropy_weight: 0.01
+baseline_decay: 0.0
+discount_factor: 1.0
+
+positive_reward: 1.0
+negative_reward: 0.0
+
+eval_pool_mode: "max"
+eval_interval: 100
+nell_evaluation: 0
