@@ -20,7 +20,7 @@ from options import read_options
 from environment import Environment
 from baseline import ReactiveBaseline
 from nell_eval import nell_eval
-from model.gwm.model import GWM
+from ..gwm.model import GWM
 
 
 class Trainer(object):
