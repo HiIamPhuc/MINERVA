@@ -8,6 +8,7 @@ gwm_model_path: ""
 hallucinate_k: 3
 gwm_text_cache_device: "cpu"
 embedding_cache_device: "cpu"
+action_scoring_chunk_size: 1
 
 max_actions: 400
 path_length: 3
