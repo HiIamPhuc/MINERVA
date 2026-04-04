@@ -22,8 +22,8 @@ device: cuda
 seed: 42
 
 text_cache_batch_size: 128
-text_cache_encode_device: cpu
-text_cache_store_device: cuda
+text_cache_encode_device: cuda
+text_cache_store_device: cpu
 
 eval_batch_size: 1024
 candidate_batch_size: 1024

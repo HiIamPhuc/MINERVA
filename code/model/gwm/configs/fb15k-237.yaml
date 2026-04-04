@@ -11,7 +11,7 @@ loss: infonce
 num_epochs: 200
 temperature: 0.07
 
-data_dir: data-processed/WN18RR
+data_dir: data-processed/FB15k-237
 output_dir: output/gwm
     
 add_inverse: true
@@ -21,9 +21,9 @@ eval_every: 1
 device: cuda
 seed: 42
 
-text_cache_batch_size: 64
-text_cache_encode_device: cpu
-text_cache_store_device: cuda
+text_cache_batch_size: 128
+text_cache_encode_device: cuda
+text_cache_store_device: cpu
 
 eval_batch_size: 1024
 candidate_batch_size: 1024
