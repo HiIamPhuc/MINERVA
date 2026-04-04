@@ -1,8 +1,8 @@
 from __future__ import absolute_import
 from __future__ import division
 import numpy as np
-from MINERVA.code.model.minerva.data.data_batcher import RelationEntityBatcher
-from MINERVA.code.model.minerva.data.data_grapher import RelationEntityGrapher
+from data.data_batcher import RelationEntityBatcher
+from data.data_grapher import RelationEntityGrapher
 import logging
 
 logger = logging.getLogger()
