@@ -4,8 +4,6 @@ import numpy as np
 import os
 import torch
 
-logger = logging.getLogger(__name__)
-
 
 class RelationEntityGrapher:
     def __init__(self, data_dir, relation2id, entity2id, max_actions):

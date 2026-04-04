@@ -1,8 +1,8 @@
 from __future__ import absolute_import
 from __future__ import division
 import numpy as np
-from data.data_batcher import RelationEntityBatcher
-from data.data_grapher import RelationEntityGrapher
+from data_batcher import RelationEntityBatcher
+from data_grapher import RelationEntityGrapher
 import logging
 
 logger = logging.getLogger()

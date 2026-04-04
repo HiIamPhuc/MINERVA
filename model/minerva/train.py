@@ -18,6 +18,7 @@ from options import read_options
 from environment import Environment
 from baseline import ReactiveBaseline
 from nell_eval import nell_eval
+from model.gwm.model import GWM
 
 
 class Trainer(object):
@@ -409,7 +410,6 @@ if __name__ == "__main__":
     )
 
     try:
-        from MINERVA.code.model.gwm.model import GWM
         print("Loading pre-trained Graph World Model (GWM-RNN)...")
         gwm_weights_path = options.get("gwm_model_path", "")
         if not gwm_weights_path or not os.path.exists(gwm_weights_path):
