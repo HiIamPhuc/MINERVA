@@ -28,6 +28,7 @@ class Agent(nn.Module):
         self.hidden_size = params['hidden_size']
         self.num_lstm_layers = params['num_lstm_layers']
         self.action_scoring_chunk_size = int(params.get('action_scoring_chunk_size', 32))
+        self.embedding_cache_device = str(params.get('embedding_cache_device', 'cpu'))
 
         self._precompute_and_cache_embeddings()
 
@@ -48,18 +49,22 @@ class Agent(nn.Module):
         with torch.no_grad():
             self.gwm_model.eval()
             gwm_device = next(self.gwm_model.parameters()).device
+            cache_device = torch.device(self.embedding_cache_device)
             
             # Entities
             entity_ids = torch.arange(self.entity2id_size, device=gwm_device)
-            cached_ent = self._generate_hybrid_core(entity_ids, kind='entity')
-            self.register_buffer('cached_entity_embeddings', cached_ent)
+            cached_ent = self._generate_hybrid_core(entity_ids, kind='entity').to(cache_device)
+            self.cached_entity_embeddings = cached_ent
             self.gwm_model.cached_entity_embeddings = self.cached_entity_embeddings
             
             # Relations
             relation_ids = torch.arange(self.relation2id_size, device=gwm_device)
-            cached_rel = self._generate_hybrid_core(relation_ids, kind='relation')
-            self.register_buffer('cached_relation_embeddings', cached_rel)
+            cached_rel = self._generate_hybrid_core(relation_ids, kind='relation').to(cache_device)
+            self.cached_relation_embeddings = cached_rel
             self.gwm_model.cached_relation_embeddings = self.cached_relation_embeddings
+
+            if cache_device.type == 'cpu' and torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def _generate_hybrid_core(self, ids, kind='entity'):
         pad_id = self.ePAD if kind == 'entity' else self.rPAD
@@ -77,12 +82,22 @@ class Agent(nn.Module):
         fused_emb[mask] = 0.0
         return fused_emb
 
+    def _lookup_from_cache(self, cache_tensor, ids, target_device):
+        flat_ids = ids.view(-1)
+        if flat_ids.device != cache_tensor.device:
+            flat_ids = flat_ids.to(cache_tensor.device)
+        selected = cache_tensor.index_select(0, flat_ids)
+        selected = selected.view(*ids.shape, -1)
+        if selected.device != target_device:
+            selected = selected.to(target_device)
+        return selected
+
     def lookup_entity(self, entities):
-        emb = self.cached_entity_embeddings[entities]
+        emb = self._lookup_from_cache(self.cached_entity_embeddings, entities, self.gwm_entity_proj.weight.device)
         return self.gwm_entity_proj(emb)
 
     def lookup_relation(self, relations):
-        emb = self.cached_relation_embeddings[relations]
+        emb = self._lookup_from_cache(self.cached_relation_embeddings, relations, self.gwm_relation_proj.weight.device)
         return self.gwm_relation_proj(emb)
 
     def get_mem_shape(self):
@@ -121,7 +136,9 @@ class Agent(nn.Module):
 
     def _score_candidate_actions(self, policy_output, next_relations, next_entities):
         """Scores candidate actions in chunks to reduce peak GPU memory."""
-        output_expanded = policy_output.unsqueeze(1)  # [B, 1, 4E]
+        rel_query, ent_query = torch.chunk(policy_output, chunks=2, dim=-1)  # [B, 2E], [B, 2E]
+        rel_query = rel_query.unsqueeze(1)
+        ent_query = ent_query.unsqueeze(1)
         chunk_scores = []
         num_actions = next_relations.size(1)
 
@@ -132,9 +149,8 @@ class Agent(nn.Module):
 
             relation_embedding = self.lookup_relation(rel_chunk)
             entity_embedding = self.lookup_entity(ent_chunk)
-            candidate_action_embeddings = torch.cat([relation_embedding, entity_embedding], dim=-1)
-
-            score_chunk = torch.sum(candidate_action_embeddings * output_expanded, dim=2)
+            score_chunk = torch.sum(relation_embedding * rel_query, dim=2)
+            score_chunk = score_chunk + torch.sum(entity_embedding * ent_query, dim=2)
             chunk_scores.append(score_chunk)
 
         return torch.cat(chunk_scores, dim=1)

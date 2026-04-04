@@ -33,6 +33,7 @@ def read_options():
     parser.add_argument("--log_dir", type=str, default=None)
     parser.add_argument("--gwm_model_path", type=str, default=None)
     parser.add_argument("--hallucinate_k", type=int, default=None)
+    parser.add_argument("--embedding_cache_device", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--total_steps", type=int, default=None)
@@ -75,6 +76,7 @@ def read_options():
         "gwm_model_path": "",
         "hallucinate_k": 3,
         "gwm_text_cache_device": "cpu",
+        "embedding_cache_device": "cpu",
     }
 
     cfg = {**defaults, **loaded}

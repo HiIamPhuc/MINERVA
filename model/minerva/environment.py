@@ -67,9 +67,13 @@ class Episode(object):
                 
                 with torch.no_grad():
                     device = next(self.gwm_model.parameters()).device
-                    
-                    curr_emb = self.gwm_model.cached_entity_embeddings[curr_ent_safe.to(device)]
-                    end_emb = self.gwm_model.cached_entity_embeddings[end_ent_safe.to(device)]
+
+                    cache = self.gwm_model.cached_entity_embeddings
+                    cache_device = cache.device
+                    curr_ids = curr_ent_safe.to(cache_device)
+                    end_ids = end_ent_safe.to(cache_device)
+                    curr_emb = cache.index_select(0, curr_ids.view(-1)).view(*curr_ids.shape, -1).to(device)
+                    end_emb = cache.index_select(0, end_ids.view(-1)).view(*end_ids.shape, -1).to(device)
                     
                     # Cosine Similarity
                     curr_emb = torch.nn.functional.normalize(curr_emb, p=2, dim=-1)
