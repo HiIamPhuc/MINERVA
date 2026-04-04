@@ -27,6 +27,7 @@ class Agent(nn.Module):
         self.embedding_size = self.gwm_dim
         self.hidden_size = params['hidden_size']
         self.num_lstm_layers = params['num_lstm_layers']
+        self.action_scoring_chunk_size = int(params.get('action_scoring_chunk_size', 32))
 
         self._precompute_and_cache_embeddings()
 
@@ -118,6 +119,26 @@ class Agent(nn.Module):
             input_t = h_i
         return input_t, (torch.stack(next_h, dim=0), torch.stack(next_c, dim=0))
 
+    def _score_candidate_actions(self, policy_output, next_relations, next_entities):
+        """Scores candidate actions in chunks to reduce peak GPU memory."""
+        output_expanded = policy_output.unsqueeze(1)  # [B, 1, 4E]
+        chunk_scores = []
+        num_actions = next_relations.size(1)
+
+        for start in range(0, num_actions, self.action_scoring_chunk_size):
+            end = min(start + self.action_scoring_chunk_size, num_actions)
+            rel_chunk = next_relations[:, start:end]
+            ent_chunk = next_entities[:, start:end]
+
+            relation_embedding = self.lookup_relation(rel_chunk)
+            entity_embedding = self.lookup_entity(ent_chunk)
+            candidate_action_embeddings = torch.cat([relation_embedding, entity_embedding], dim=-1)
+
+            score_chunk = torch.sum(candidate_action_embeddings * output_expanded, dim=2)
+            chunk_scores.append(score_chunk)
+
+        return torch.cat(chunk_scores, dim=1)
+
     def step(self, next_relations, next_entities, prev_state, prev_relation, 
              query_embedding, current_entities, range_arr):
         prev_action_embedding = self.action_encoder(prev_relation, current_entities)
@@ -126,12 +147,10 @@ class Agent(nn.Module):
         prev_entity = self.lookup_entity(current_entities)
         state = torch.cat([output, prev_entity], dim=-1)
         
-        candidate_action_embeddings = self.action_encoder(next_relations, next_entities)
         state_query_concat = torch.cat([state, query_embedding], dim=-1)
 
         output = self.policy_MLP(state_query_concat)
-        output_expanded = output.unsqueeze(1)  # [B, 1, mE]
-        prelim_scores = torch.sum(candidate_action_embeddings * output_expanded, dim=2)
+        prelim_scores = self._score_candidate_actions(output, next_relations, next_entities)
 
         mask = next_relations.eq(self.rPAD)
         scores = prelim_scores.masked_fill(mask, -99999.0)

@@ -17,6 +17,7 @@ test_rollouts: 100
 
 hidden_size: 50
 num_lstm_layers: 1
+action_scoring_chunk_size: 16
 
 learning_rate: 0.001
 grad_clip_norm: 5
