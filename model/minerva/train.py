@@ -109,6 +109,7 @@ class Trainer(object):
             range_arr = torch.arange(batch_total, dtype=torch.long, device=self.device)
 
             query_relation = torch.tensor(episode.get_query_relation(), dtype=torch.long, device=self.device)
+            query_embedding = self.agent.lookup_relation(query_relation)
             prev_state = self.agent.init_memory(batch_total, self.device)
             prev_relation = self.agent.get_dummy_start_label(batch_total, self.device)
 
@@ -125,7 +126,7 @@ class Trainer(object):
                     next_entities,
                     prev_state,
                     prev_relation,
-                    self.agent.lookup_relation(query_relation),
+                    query_embedding,
                     current_entities,
                     range_arr=range_arr,
                 )

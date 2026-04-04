@@ -34,6 +34,7 @@ def read_options():
     parser.add_argument("--gwm_model_path", type=str, default=None)
     parser.add_argument("--hallucinate_k", type=int, default=None)
     parser.add_argument("--embedding_cache_device", type=str, default=None)
+    parser.add_argument("--action_scoring_chunk_size", type=int, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--total_steps", type=int, default=None)
@@ -77,6 +78,7 @@ def read_options():
         "hallucinate_k": 3,
         "gwm_text_cache_device": "cpu",
         "embedding_cache_device": "cpu",
+        "action_scoring_chunk_size": 1,
     }
 
     cfg = {**defaults, **loaded}

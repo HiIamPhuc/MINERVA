@@ -27,7 +27,7 @@ class Agent(nn.Module):
         self.embedding_size = self.gwm_dim
         self.hidden_size = params['hidden_size']
         self.num_lstm_layers = params['num_lstm_layers']
-        self.action_scoring_chunk_size = int(params.get('action_scoring_chunk_size', 32))
+        self.action_scoring_chunk_size = max(1, int(params.get('action_scoring_chunk_size', 1)))
         self.embedding_cache_device = str(params.get('embedding_cache_device', 'cpu'))
 
         self._precompute_and_cache_embeddings()
@@ -147,10 +147,10 @@ class Agent(nn.Module):
             rel_chunk = next_relations[:, start:end]
             ent_chunk = next_entities[:, start:end]
 
-            relation_embedding = self.lookup_relation(rel_chunk)
-            entity_embedding = self.lookup_entity(ent_chunk)
-            score_chunk = torch.sum(relation_embedding * rel_query, dim=2)
-            score_chunk = score_chunk + torch.sum(entity_embedding * ent_query, dim=2)
+            # Compute relation/entity contributions sequentially to avoid holding
+            # both projected tensors in memory at the same time.
+            score_chunk = torch.sum(self.lookup_relation(rel_chunk) * rel_query, dim=2)
+            score_chunk = score_chunk + torch.sum(self.lookup_entity(ent_chunk) * ent_query, dim=2)
             chunk_scores.append(score_chunk)
 
         return torch.cat(chunk_scores, dim=1)
