@@ -58,7 +58,7 @@ class RelationEntityGrapher:
             try:
                 virtual_entities = gwm_model.predict_latent_jumps(current_entities, query_relations, k=k)
             except Exception as e:
-                logger.warning(f"GWM prediction failed: {e}")
+                print(f"GWM prediction failed: {e}")
                 virtual_entities = None
 
             if virtual_entities is not None:
@@ -73,9 +73,7 @@ class RelationEntityGrapher:
                     # Concatenate virtual edges to the physical edges
                     ret = np.concatenate([ret, virtual_edges], axis=1)
                 else:
-                    logger.warning(
-                        f"GWM predict_latent_jumps returned shape {virtual_entities.shape}; expected {(batch_sz, k)}. Skipping hallucinated edges."
-                    )
+                    print(f"GWM predict_latent_jumps returned shape {virtual_entities.shape}; expected {(batch_sz, k)}. Skipping hallucinated edges.")
 
         for i in range(current_entities.shape[0]):
             if current_entities[i] == start_entities[i]:

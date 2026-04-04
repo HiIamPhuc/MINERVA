@@ -5,8 +5,6 @@ from data_batcher import RelationEntityBatcher
 from data_grapher import RelationEntityGrapher
 import logging
 
-logger = logging.getLogger()
-
 
 class Episode(object):
 

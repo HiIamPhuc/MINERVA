@@ -12,6 +12,8 @@ import gc
 import resource
 from scipy.special import logsumexp as lse
 
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from agent import Agent
 from options import read_options
