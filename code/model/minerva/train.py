@@ -4,14 +4,12 @@ from tqdm import tqdm
 import json
 import time
 import os
-import logging
 import numpy as np
 import torch
 import codecs
 from collections import defaultdict
 import gc
 import resource
-import sys
 from scipy.special import logsumexp as lse
 
 
@@ -20,9 +18,6 @@ from options import read_options
 from environment import Environment
 from baseline import ReactiveBaseline
 from nell_eval import nell_eval
-
-logger = logging.getLogger()
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 
 class Trainer(object):
@@ -43,6 +38,7 @@ class Trainer(object):
 
         self.id2relation = self.train_environment.grapher.id2relation
         self.id2entity = self.train_environment.grapher.id2entity
+        self.scores_file = os.path.join(self.output_dir, "scores.txt")
 
         self.max_hits_at_10 = 0
         
@@ -155,7 +151,7 @@ class Trainer(object):
             if np.isnan(train_loss):
                 raise ArithmeticError("Error in computing loss")
 
-            logger.info(
+            print(
                 "batch_counter: {0:4d}, num_hits: {1:7.4f}, avg. reward per batch {2:7.4f}, "
                 "num_ep_correct {3:4d}, avg_ep_correct {4:7.4f}, train loss {5:7.4f}".format(
                     self.batch_counter,
@@ -168,15 +164,15 @@ class Trainer(object):
             )
 
             if self.batch_counter % self.eval_interval == 0:
-                with open(self.output_dir + "/scores.txt", "a") as score_file:
-                    score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
+                with open(self.scores_file, "a", encoding="utf-8") as score_file:
+                    score_file.write("Score for step " + str(self.batch_counter) + "\n\n")
 
                 os.makedirs(self.path_logger_file + "/" + str(self.batch_counter), exist_ok=True)
                 self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
 
                 self.test(beam=True, print_paths=False)
 
-            logger.info("Memory usage: %s (kb)" % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+            print("Memory usage: %s (kb)" % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
 
             gc.collect()
             if self.batch_counter >= self.total_steps:
@@ -364,8 +360,8 @@ class Trainer(object):
                             )
                         paths[str(query_relation_val)].append("#####################\n")
 
-        for k in metrics:
-            metrics[k] /= total_examples
+        for metric_name in metrics:
+            metrics[metric_name] /= total_examples
 
         if save_model:
             if metrics["Hits@10"] >= self.max_hits_at_10:
@@ -373,7 +369,7 @@ class Trainer(object):
                 self.save_path = self._save_checkpoint()
 
         if print_paths:
-            logger.info("[ printing paths at {} ]".format(self.output_dir + "/test_beam/"))
+            print("[ printing paths at {} ]".format(self.output_dir + "/test_beam/"))
             for q in paths:
                 j = q.replace("/", "-")
                 with codecs.open(self.path_logger_file_ + "_" + j, "a", "utf-8") as pos_file:
@@ -383,11 +379,11 @@ class Trainer(object):
                 for a in answers:
                     answer_file.write(a)
 
-        with open(self.output_dir + "/scores.txt", "a") as score_file:
-            for k, v in metrics.items():
-                score_str = "{0}: {1:7.4f}".format(k, v)
-                score_file.write(score_str + "\n")
-                logger.info(score_str)
+        with open(self.scores_file, "a", encoding="utf-8") as score_file:
+            for key, value in metrics.items():
+                metric_line = "{0}: {1:7.4f}".format(key, value)
+                print(metric_line)
+                score_file.write(metric_line + "\n")
             score_file.write("\n")
 
     # Cleaned up redundant top_k in favor of torch.topk natively
@@ -401,26 +397,20 @@ class Trainer(object):
 if __name__ == "__main__":
     options = read_options()
 
-    logger.setLevel(logging.INFO)
-    fmt = logging.Formatter("%(asctime)s: [ %(message)s ]", "%m/%d/%Y %I:%M:%S %p")
-    console = logging.StreamHandler()
-    console.setFormatter(fmt)
-    logger.addHandler(console)
-    logfile = logging.FileHandler(options["log_file_name"], "w")
-    logfile.setFormatter(fmt)
-    logger.addHandler(logfile)
-
-    logger.info("reading vocab files...")
+    print("Loaded config:", options.get("config_path", "<inline>"))
+    print("Loading vocab from:", options["data_dir"])
     options["relation2id"] = json.load(open(options["data_dir"] + "/relation2id.json"))
     options["entity2id"] = json.load(open(options["data_dir"] + "/entity2id.json"))
-    logger.info("Reading mid to name map")
-    logger.info("Done..")
-    logger.info("Total number of entities {}".format(len(options["entity2id"])))
-    logger.info("Total number of relations {}".format(len(options["relation2id"])))
+    print(
+        "Vocab loaded | entities={} relations={}".format(
+            len(options["entity2id"]),
+            len(options["relation2id"]),
+        )
+    )
 
     try:
         from MINERVA.code.model.gwm.model import GWM
-        logger.info("Loading pre-trained Graph World Model (GWM-RNN)...")
+        print("Loading pre-trained Graph World Model (GWM-RNN)...")
         gwm_weights_path = options.get("gwm_model_path", "")
         if not gwm_weights_path or not os.path.exists(gwm_weights_path):
             raise FileNotFoundError(
@@ -468,13 +458,13 @@ if __name__ == "__main__":
 
     os.makedirs(path_logger_file + "/" + "test_beam", exist_ok=True)
     test_trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
-    with open(output_dir + "/scores.txt", "a") as score_file:
+    with open(test_trainer.scores_file, "a", encoding="utf-8") as score_file:
         score_file.write("Test (beam) scores with best model from " + str(save_path) + "\n")
     test_trainer.test_environment = test_trainer.test_test_environment
     test_trainer.test_environment.test_rollouts = 100
 
     test_trainer.test(beam=True, print_paths=True, save_model=False)
 
-    print(options["nell_evaluation"])
+    print("NELL evaluation flag:", options["nell_evaluation"])
     if options["nell_evaluation"] == 1:
         nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers", test_trainer.data_dir + "/sort_test.pairs")

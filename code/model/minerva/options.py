@@ -4,7 +4,6 @@ import argparse
 import uuid
 import os
 import yaml
-from pprint import pprint
 
 
 class Config(dict):
@@ -79,6 +78,7 @@ def read_options():
     }
 
     cfg = {**defaults, **loaded}
+    cfg["config_path"] = config_path
 
     # CLI overrides always win when provided
     for k, v in cli_args.items():
@@ -101,12 +101,7 @@ def read_options():
     with open(os.path.join(cfg["output_dir"], "resolved_config.yaml"), "w", encoding="utf-8") as out_yaml:
         yaml.safe_dump(cfg, out_yaml, sort_keys=True)
     with open(os.path.join(cfg["output_dir"], "config.txt"), "w", encoding="utf-8") as out_txt:
-        pprint(cfg, stream=out_txt)
-
-    maxLen = max([len(ii) for ii in cfg.keys()])
-    fmtString = '\t%' + str(maxLen) + 's : %s'
-    print('Arguments:')
-    for keyPair in sorted(cfg.items()):
-        print(fmtString % keyPair)
+        for key in sorted(cfg.keys()):
+            out_txt.write(f"{key}: {cfg[key]}\n")
 
     return Config.from_dict(cfg)
