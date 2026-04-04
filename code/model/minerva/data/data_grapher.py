@@ -53,7 +53,6 @@ class RelationEntityGrapher:
     def return_next_actions(self, current_entities, start_entities, query_relations, answers, all_correct_answers, last_step, rollouts, gwm_model=None, k=3):
         ret = self.action_space[current_entities, :, :].copy()
         
-        # --- GWM-RNN VIRTUAL EDGES INTEGRATION (PLACEHOLDER) ---
         if gwm_model is not None and hasattr(gwm_model, 'predict_latent_jumps'):
             batch_sz = current_entities.shape[0]
             virtual_edges = np.zeros((batch_sz, k, 2), dtype=np.dtype('int32'))
@@ -79,7 +78,6 @@ class RelationEntityGrapher:
                     logger.warning(
                         f"GWM predict_latent_jumps returned shape {virtual_entities.shape}; expected {(batch_sz, k)}. Skipping hallucinated edges."
                     )
-        # --------------------------------------------------------
 
         for i in range(current_entities.shape[0]):
             if current_entities[i] == start_entities[i]:

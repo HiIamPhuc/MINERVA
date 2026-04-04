@@ -6,6 +6,7 @@ log_dir: "./logs"
 
 gwm_model_path: ""
 hallucinate_k: 3
+gwm_text_cache_device: "cpu"
 
 max_actions: 400
 path_length: 3

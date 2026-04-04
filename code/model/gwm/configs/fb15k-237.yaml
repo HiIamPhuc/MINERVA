@@ -1,5 +1,5 @@
-# Config for GWM-RNN-Text
-pretrained_model: bert-base-uncased
+# Config for GWM with precomputed text embeddings
+text_embedding_dim: 768
 num_layers: 2
 hidden_dim: 1024
 structural_dim: 896
@@ -21,12 +21,7 @@ eval_every: 1
 device: cuda
 seed: 42
 
-text_cache_batch_size: 128
-text_cache_encode_device: cuda
-text_cache_store_device: cpu
+text_cache_device: cpu
 
 eval_batch_size: 1024
 candidate_batch_size: 1024
-
-max_length: 512
-max_relation_length: 128

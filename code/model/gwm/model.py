@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-import contextlib
-from transformers import AutoModel, AutoTokenizer
 
 class GWMConfig:
     def __init__(self, **kwargs):
@@ -12,15 +10,8 @@ class GWM(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        
-        # 1. Text Encoder (always frozen, used only for one-time cache building)
-        self.tokenizer = AutoTokenizer.from_pretrained(config.pretrained_model)
-        self.text_encoder = AutoModel.from_pretrained(config.pretrained_model)
-        for param in self.text_encoder.parameters():
-            param.requires_grad = False
-        self.text_encoder.eval()
-                
-        # 2. Structural Component (Entity/Relation Embeddings)
+
+        # 1. Structural Component (Entity/Relation Embeddings)
         self.structural_dim = config.structural_dim
         self.entity_embeddings = nn.Embedding(config.num_entities, self.structural_dim)
         self.relation_embeddings = nn.Embedding(config.num_relations, self.structural_dim)
@@ -29,7 +20,7 @@ class GWM(nn.Module):
         if self.structural_dim != config.hidden_dim:
             self.structural_projection = nn.Linear(self.structural_dim, config.hidden_dim)
         
-        # 3. Path Processing (RNN / GWM Core)
+        # 2. Path Processing (RNN / GWM Core)
         # Context-Free (No neighborhood nodes), just [Head -> Relation]
         self.lstm = nn.LSTM(
             input_size=config.hidden_dim, 
@@ -39,8 +30,8 @@ class GWM(nn.Module):
             dropout=getattr(config, 'dropout', 0.1) if getattr(config, 'num_layers', 1) > 1 else 0
         )
         
-        # 4. Fusion Layer
-        text_dim = self.text_encoder.config.hidden_size
+        # 3. Fusion Layer
+        text_dim = int(getattr(config, 'text_embedding_dim', config.hidden_dim))
         self.text_projection = nn.Linear(text_dim, config.hidden_dim)
         self.fusion_mode = getattr(config, 'fusion_mode', 'concat')
 
@@ -56,121 +47,97 @@ class GWM(nn.Module):
 
         self.reset_alpha_stats()
         
-        # 5. Output Projector
+        # 4. Output Projector
         self.projector = nn.Linear(config.hidden_dim, config.hidden_dim)
 
         self.cached_entity_text_emb = None
         self.cached_relation_text_emb = None
         self.use_text_cache = False
         self._cached_all_entity_targets = None
-        
-    def _encode_text(self, input_ids, attention_mask):
-        if self.text_encoder is None:
-            raise RuntimeError("Text encoder is released. Build cache before using ID lookups.")
-        outputs = self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)
-        return outputs.last_hidden_state[:, 0, :] # [CLS] token
 
-    def build_text_embedding_cache(
-        self,
-        entity_text_map,
-        relation_text_map,
-        device,
-        batch_size=128,
-        max_entity_length=512,
-        max_relation_length=128,
-        encode_device=None,
-        cache_device=None,
-        autocast_text_encoder=True,
-    ):
+    def _load_embedding_tensor(self, source, expected_rows, name):
+        if isinstance(source, str):
+            loaded = torch.load(source, map_location='cpu')
+        elif torch.is_tensor(source):
+            loaded = source.detach().cpu()
+        else:
+            raise TypeError(f"Unsupported {name} cache source: {type(source)}")
+
+        if isinstance(loaded, dict):
+            if 'embeddings' in loaded:
+                loaded = loaded['embeddings']
+            elif 'tensor' in loaded:
+                loaded = loaded['tensor']
+            else:
+                raise ValueError(f"{name} cache dict must contain 'embeddings' or 'tensor'.")
+
+        if not torch.is_tensor(loaded):
+            raise TypeError(f"{name} cache must resolve to a torch.Tensor.")
+
+        loaded = loaded.float().contiguous()
+        if loaded.dim() != 2:
+            raise ValueError(f"{name} cache must be rank-2. Got shape {tuple(loaded.shape)}")
+        if loaded.size(0) != expected_rows:
+            raise ValueError(
+                f"{name} cache row count mismatch. Expected {expected_rows}, got {loaded.size(0)}"
+            )
+        return loaded
+
+    def load_precomputed_text_embedding_cache(self, entity_source, relation_source, cache_device='cpu'):
         if self.use_text_cache and self.cached_entity_text_emb is not None and self.cached_relation_text_emb is not None:
             return
 
-        if self.text_encoder is None:
-            raise RuntimeError("Text encoder is not available and cache is missing.")
+        cache_device = torch.device(cache_device)
 
-        runtime_device = torch.device(device)
-        encode_device = torch.device(encode_device) if encode_device is not None else runtime_device
-        cache_device = torch.device(cache_device) if cache_device is not None else runtime_device
+        entity_cache = self._load_embedding_tensor(
+            source=entity_source,
+            expected_rows=self.entity_embeddings.num_embeddings,
+            name='entity',
+        ).to(cache_device)
 
-        self.text_encoder.to(encode_device)
-        if runtime_device.type == 'cuda' and encode_device.type != 'cuda' and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        self.text_encoder.eval()
+        relation_cache = self._load_embedding_tensor(
+            source=relation_source,
+            expected_rows=self.relation_embeddings.num_embeddings,
+            name='relation',
+        ).to(cache_device)
 
-        def _encode_text_list(text_list, max_length):
-            all_emb = []
-            start = 0
-            effective_batch_size = max(1, int(batch_size))
+        if entity_cache.size(1) != relation_cache.size(1):
+            raise ValueError(
+                "Entity and relation text embeddings must share the same embedding dimension. "
+                f"Got {entity_cache.size(1)} and {relation_cache.size(1)}"
+            )
 
-            with torch.inference_mode():
-                while start < len(text_list):
-                    end = min(start + effective_batch_size, len(text_list))
-                    chunk = text_list[start:end]
+        expected_text_dim = self.text_projection.in_features
+        if entity_cache.size(1) != expected_text_dim:
+            raise ValueError(
+                "Text embedding dimension mismatch with model config. "
+                f"Expected {expected_text_dim}, got {entity_cache.size(1)}"
+            )
 
-                    try:
-                        enc = self.tokenizer(
-                            chunk,
-                            padding=True,
-                            truncation=True,
-                            return_tensors='pt',
-                            max_length=max_length,
-                        )
-                        enc = {k: v.to(encode_device) for k, v in enc.items()}
-
-                        use_autocast = encode_device.type == 'cuda' and autocast_text_encoder
-                        autocast_ctx = (
-                            torch.autocast(device_type='cuda', dtype=torch.float16)
-                            if use_autocast else contextlib.nullcontext()
-                        )
-
-                        with autocast_ctx:
-                            emb = self._encode_text(enc['input_ids'], enc['attention_mask'])
-
-                        all_emb.append(emb.to(cache_device, non_blocking=True).contiguous())
-                        start = end
-                    except torch.OutOfMemoryError:
-                        if encode_device.type != 'cuda' or effective_batch_size == 1:
-                            raise
-                        torch.cuda.empty_cache()
-                        effective_batch_size = max(1, effective_batch_size // 2)
-
-            return torch.cat(all_emb, dim=0).contiguous()
-
-        num_entities = self.entity_embeddings.num_embeddings
-        num_relations = self.relation_embeddings.num_embeddings
-
-        entity_texts = [entity_text_map.get(str(i), f"Entity {i}") for i in range(num_entities)]
-        relation_texts = [relation_text_map.get(str(i), f"Relation {i}") for i in range(num_relations)]
-
-        self.cached_entity_text_emb = _encode_text_list(entity_texts, max_entity_length)
-        self.cached_relation_text_emb = _encode_text_list(relation_texts, max_relation_length)
+        self.cached_entity_text_emb = entity_cache
+        self.cached_relation_text_emb = relation_cache
         self.use_text_cache = True
         self._cached_all_entity_targets = None
 
-        if getattr(self.config, 'drop_text_encoder_after_cache', True):
-            self.text_encoder = None
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+        if cache_device.type == 'cpu' and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    # Backward-compatible alias for older callers.
+    def build_text_embedding_cache(self, entity_source, relation_source, device='cpu', **_kwargs):
+        self.load_precomputed_text_embedding_cache(entity_source, relation_source, cache_device=device)
 
     def _lookup_cached_text(self, ids, kind='entity'):
         cache = self.cached_entity_text_emb if kind == 'entity' else self.cached_relation_text_emb
         if cache is None:
-            raise RuntimeError("Text cache is not built. Call build_text_embedding_cache first.")
+            raise RuntimeError("Text cache is not built. Call load_precomputed_text_embedding_cache first.")
 
         original_shape = ids.shape
         flat_ids = ids.view(-1)
         if flat_ids.device != cache.device:
-            flat_ids = flat_ids.to(cache.device, non_blocking=True)
-
+            flat_ids = flat_ids.to(cache.device)
         selected = cache.index_select(0, flat_ids)
-
         if selected.device != ids.device:
-            selected = selected.to(ids.device, non_blocking=True)
-
-        target_dtype = self.text_projection.weight.dtype
-        if selected.dtype != target_dtype:
-            selected = selected.to(dtype=target_dtype)
-
+            selected = selected.to(ids.device)
         return selected.view(*original_shape, -1)
 
     def _project_structural(self, struct_emb):
@@ -211,7 +178,7 @@ class GWM(nn.Module):
         r_batch: dict {'id'}
         """
         if not self.use_text_cache:
-            raise RuntimeError("Text cache is not built. Call build_text_embedding_cache before training/inference.")
+            raise RuntimeError("Text cache is not built. Call load_precomputed_text_embedding_cache before training/inference.")
 
         h_emb_text = self._lookup_cached_text(h_batch['id'], kind='entity')
         r_emb_text = self._lookup_cached_text(r_batch['id'], kind='relation')
@@ -235,7 +202,7 @@ class GWM(nn.Module):
 
     def encode_target(self, t_batch):
         if not self.use_text_cache:
-            raise RuntimeError("Text cache is not built. Call build_text_embedding_cache before training/inference.")
+            raise RuntimeError("Text cache is not built. Call load_precomputed_text_embedding_cache before training/inference.")
 
         t_emb_text = self._lookup_cached_text(t_batch['id'], kind='entity')
         t_struct = self.entity_embeddings(t_batch['id'])
@@ -260,7 +227,7 @@ class GWM(nn.Module):
 
     def predict_latent_jumps(self, current_entities, query_relations, k=3):
         if not self.use_text_cache:
-            raise RuntimeError("Text cache is not built. Call build_text_embedding_cache first.")
+            raise RuntimeError("Text cache is not built. Call load_precomputed_text_embedding_cache first.")
 
         device = next(self.parameters()).device
         with torch.no_grad():
@@ -287,18 +254,31 @@ class GWM(nn.Module):
     def load_from_checkpoint(cls, checkpoint_path):
         checkpoint = torch.load(checkpoint_path, map_location='cpu')
         config_dict = checkpoint.get('config', {})
-        required_fields = ['pretrained_model', 'structural_dim', 'hidden_dim', 'num_entities', 'num_relations']
+        required_fields = ['structural_dim', 'hidden_dim', 'num_entities', 'num_relations']
         missing = [f for f in required_fields if f not in config_dict]
         if missing:
             raise ValueError(
                 f"Checkpoint config missing required fields: {missing}. "
-                "Expected fields: pretrained_model, structural_dim, hidden_dim, num_entities, num_relations."
+                "Expected fields: structural_dim, hidden_dim, num_entities, num_relations."
             )
 
-        config = GWMConfig(**config_dict)
-        model = cls(config)
         state_dict = checkpoint.get('state_dict', checkpoint.get('model_state_dict'))
         if state_dict is None:
             raise ValueError("Checkpoint does not contain 'state_dict' or 'model_state_dict'.")
+
+        if 'text_embedding_dim' not in config_dict:
+            if 'text_projection.weight' in state_dict:
+                config_dict['text_embedding_dim'] = state_dict['text_projection.weight'].shape[1]
+            elif 'fusion.weight' in state_dict:
+                fusion_in = state_dict['fusion.weight'].shape[1]
+                config_dict['text_embedding_dim'] = fusion_in - int(config_dict['structural_dim'])
+            else:
+                raise ValueError(
+                    "Unable to infer text_embedding_dim from checkpoint. "
+                    "Please include text_embedding_dim in checkpoint config."
+                )
+
+        config = GWMConfig(**config_dict)
+        model = cls(config)
         model.load_state_dict(state_dict, strict=False)
         return model

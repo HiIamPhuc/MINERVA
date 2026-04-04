@@ -15,11 +15,11 @@ import sys
 from scipy.special import logsumexp as lse
 
 
-from MINERVA.code.model.minerva.agent import Agent
-from MINERVA.code.options import read_options
-from MINERVA.code.model.minerva.environment import Environment
-from MINERVA.code.model.minerva.baseline import ReactiveBaseline
-from MINERVA.code.model.minerva.nell_eval import nell_eval
+from agent import Agent
+from options import read_options
+from environment import Environment
+from baseline import ReactiveBaseline
+from nell_eval import nell_eval
 
 logger = logging.getLogger()
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -430,22 +430,20 @@ if __name__ == "__main__":
         gwm_model = GWM.load_from_checkpoint(gwm_weights_path)
         gwm_model.eval()
 
-        entity_text_path = os.path.join(options["data_dir"], "entity_text.json")
-        relation_text_path = os.path.join(options["data_dir"], "relation_text.json")
-        if not os.path.exists(entity_text_path) or not os.path.exists(relation_text_path):
+        entity_emb_path = os.path.join(options["data_dir"], "entity_text_embeddings.pt")
+        relation_emb_path = os.path.join(options["data_dir"], "relation_text_embeddings.pt")
+        if not os.path.exists(entity_emb_path) or not os.path.exists(relation_emb_path):
             raise FileNotFoundError(
-                "Missing entity_text.json or relation_text.json in data_dir. "
+                "Missing entity_text_embeddings.pt or relation_text_embeddings.pt in data_dir. "
                 "Run preprocess_data.py before training."
             )
 
-        with open(entity_text_path, "r", encoding="utf-8") as ef:
-            entity_text_map = json.load(ef)
-        with open(relation_text_path, "r", encoding="utf-8") as rf:
-            relation_text_map = json.load(rf)
-
-        cache_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        gwm_model.to(cache_device)
-        gwm_model.build_text_embedding_cache(entity_text_map, relation_text_map, cache_device)
+        cache_device = options.get("gwm_text_cache_device", "cpu")
+        gwm_model.load_precomputed_text_embedding_cache(
+            entity_source=entity_emb_path,
+            relation_source=relation_emb_path,
+            cache_device=cache_device,
+        )
 
         options["gwm_model"] = gwm_model
         options["hallucinate_k"] = options.get("hallucinate_k", 3)
