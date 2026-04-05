@@ -81,8 +81,11 @@ class Episode(object):
                     
                     sim = (curr_emb * end_emb).sum(dim=-1).cpu().numpy()
                     
-                    # Bound soft reward to positive similarities between 0.0 and 1.0
-                    soft_reward = np.maximum(0, sim)
+                    # 1. Only reward if similarity is greater than 0.75 (ignore loose semantic matches)
+                    sim = np.maximum(0, sim - 0.75) / 0.25 # Scales [0.75, 1.0] to[0.0, 1.0]
+                    
+                    # 2. Square it to make the agent hungry for the EXACT answer
+                    soft_reward = np.power(sim, 3.0)
                     
                     # Zero out padding elements
                     soft_reward[mask_curr.numpy()] = self.negative_reward

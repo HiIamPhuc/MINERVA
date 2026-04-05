@@ -23,7 +23,7 @@ num_lstm_layers: 1
 learning_rate: 0.001
 grad_clip_norm: 5
 l2_reg_const: 0.01
-entropy_weight: 0.01
+entropy_weight: 0.001
 baseline_decay: 0.0
 discount_factor: 1.0
 
