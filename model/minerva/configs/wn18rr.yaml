@@ -5,21 +5,21 @@ output_dir: ""
 log_dir: "./logs"
 
 gwm_model_path: ""
-hallucinate_k: 2
+hallucinate_k: 3
 gwm_text_cache_device: "cpu"
 embedding_cache_device: "cpu"
 action_scoring_chunk_size: 1
-virtual_edge_tax: 0.03
+virtual_edge_tax: 0.07
 grad_accum_steps: 4
 
 max_actions: 100
 path_length: 3
-total_steps: 10000
+total_steps: 5000
 batch_size: 16
 num_rollouts: 10
 test_rollouts: 100
 
-hidden_size: 128
+hidden_size: 256
 num_lstm_layers: 1
 
 learning_rate: 0.001
@@ -33,5 +33,5 @@ positive_reward: 1.0
 negative_reward: 0.0
 
 eval_pool_mode: "max"
-eval_interval: 2000
+eval_interval: 1000
 nell_evaluation: 0
