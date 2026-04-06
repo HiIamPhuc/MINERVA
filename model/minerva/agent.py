@@ -29,6 +29,7 @@ class Agent(nn.Module):
         self.num_lstm_layers = params['num_lstm_layers']
         self.action_scoring_chunk_size = max(1, int(params.get('action_scoring_chunk_size', 1)))
         self.embedding_cache_device = str(params.get('embedding_cache_device', 'cpu'))
+        self.virtual_edge_tax = float(params.get('virtual_edge_tax', 0.0))
 
         self._precompute_and_cache_embeddings()
 
@@ -155,8 +156,8 @@ class Agent(nn.Module):
 
         return torch.cat(chunk_scores, dim=1)
 
-    def step(self, next_relations, next_entities, prev_state, prev_relation, 
-             query_embedding, current_entities, range_arr):
+    def step(self, next_relations, next_entities, prev_state, prev_relation,
+             query_embedding, current_entities, range_arr, virtual_action_mask=None):
         prev_action_embedding = self.action_encoder(prev_relation, current_entities)
         output, new_state = self.policy_step_forward(prev_action_embedding, prev_state)
 
@@ -167,6 +168,10 @@ class Agent(nn.Module):
 
         output = self.policy_MLP(state_query_concat)
         prelim_scores = self._score_candidate_actions(output, next_relations, next_entities)
+
+        # Tax hallucinated (virtual) edges so the policy slightly prefers physical edges.
+        if virtual_action_mask is not None and self.virtual_edge_tax > 0.0:
+            prelim_scores = prelim_scores - (virtual_action_mask.to(prelim_scores.dtype) * self.virtual_edge_tax)
 
         mask = next_relations.eq(self.rPAD)
         scores = prelim_scores.masked_fill(mask, -99999.0)

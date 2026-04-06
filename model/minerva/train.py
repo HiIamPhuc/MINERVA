@@ -56,6 +56,8 @@ class Trainer(object):
         self.baseline = ReactiveBaseline(l=self.baseline_decay)
         trainable_params = [p for p in self.agent.parameters() if p.requires_grad]
         self.optimizer = torch.optim.Adam(trainable_params, lr=self.learning_rate)
+        self.grad_accum_steps = max(1, int(getattr(self, "grad_accum_steps", 1)))
+        self.optimizer_step_counter = 0
 
     def _save_checkpoint(self):
         save_path = os.path.join(self.model_dir, "model.pt")
@@ -95,11 +97,19 @@ class Trainer(object):
 
         return cum_disc_reward
 
+    def _build_virtual_action_mask(self, action_dim, batch_total, device):
+        virtual_start = min(int(self.max_actions), int(action_dim))
+        if virtual_start >= action_dim:
+            return None
+        col_ids = torch.arange(action_dim, device=device).unsqueeze(0)
+        return col_ids.ge(virtual_start).expand(batch_total, -1)
+
     def train(self):
         self.agent.train()
 
         train_loss = 0.0
         self.batch_counter = 0
+        self.optimizer.zero_grad(set_to_none=True)
 
         for episode in self.train_environment.get_episodes():
             self.batch_counter += 1
@@ -120,6 +130,11 @@ class Trainer(object):
                 next_relations = torch.tensor(state["next_relations"], dtype=torch.long, device=self.device)
                 next_entities = torch.tensor(state["next_entities"], dtype=torch.long, device=self.device)
                 current_entities = torch.tensor(state["current_entities"], dtype=torch.long, device=self.device)
+                virtual_action_mask = self._build_virtual_action_mask(
+                    action_dim=next_relations.size(1),
+                    batch_total=batch_total,
+                    device=self.device,
+                )
 
                 loss_t, prev_state, logits_t, idx_t, _ = self.agent.step(
                     next_relations,
@@ -129,6 +144,7 @@ class Trainer(object):
                     query_embedding,
                     current_entities,
                     range_arr=range_arr,
+                    virtual_action_mask=virtual_action_mask,
                 )
 
                 per_example_loss.append(loss_t)
@@ -143,10 +159,13 @@ class Trainer(object):
 
             total_loss = self.calc_reinforce_loss(per_example_loss, per_example_logits, cum_discounted_reward)
 
-            self.optimizer.zero_grad()
-            total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.agent.parameters(), self.grad_clip_norm)
-            self.optimizer.step()
+            (total_loss / self.grad_accum_steps).backward()
+            should_step = (self.batch_counter % self.grad_accum_steps == 0) or (self.batch_counter >= self.total_steps)
+            if should_step:
+                torch.nn.utils.clip_grad_norm_(self.agent.parameters(), self.grad_clip_norm)
+                self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
+                self.optimizer_step_counter += 1
 
             self.baseline.update(torch.mean(cum_discounted_reward))
 
@@ -174,7 +193,7 @@ class Trainer(object):
                 "num_hits: {4:7.4f}, avg. reward per batch {5:7.4f}, "
                 "exact_hit_rate {6:7.4f}, soft_hit_rate {7:7.4f}, "
                 "exact_ep_correct {8:4d}, soft_ep_correct {9:4d}, "
-                "avg_soft_ep_correct {10:7.4f}, train loss {11:7.4f}".format(
+                "avg_soft_ep_correct {10:7.4f}, train loss {11:7.4f}, opt_steps {12:4d}".format(
                     self.batch_counter,
                     self.total_steps,
                     progress_pct,
@@ -187,6 +206,7 @@ class Trainer(object):
                     soft_ep_correct,
                     (soft_ep_correct / self.batch_size),
                     train_loss,
+                    self.optimizer_step_counter,
                 )
             )
 
@@ -243,6 +263,11 @@ class Trainer(object):
                     next_relations_t = torch.tensor(state["next_relations"], dtype=torch.long, device=self.device)
                     next_entities_t = torch.tensor(state["next_entities"], dtype=torch.long, device=self.device)
                     current_entities_t = torch.tensor(state["current_entities"], dtype=torch.long, device=self.device)
+                    virtual_action_mask = self._build_virtual_action_mask(
+                        action_dim=next_relations_t.size(1),
+                        batch_total=batch_total,
+                        device=self.device,
+                    )
 
                     _, agent_mem, test_scores_t, test_action_idx_t, chosen_relation_t = self.agent.step(
                         next_relations_t,
@@ -252,6 +277,7 @@ class Trainer(object):
                         query_embedding,
                         current_entities_t,
                         range_arr=range_arr,
+                        virtual_action_mask=virtual_action_mask,
                     )
 
                     test_scores = test_scores_t.detach().cpu().numpy()

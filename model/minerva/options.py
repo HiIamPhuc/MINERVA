@@ -35,6 +35,8 @@ def read_options():
     parser.add_argument("--hallucinate_k", type=int, default=None)
     parser.add_argument("--embedding_cache_device", type=str, default=None)
     parser.add_argument("--action_scoring_chunk_size", type=int, default=None)
+    parser.add_argument("--virtual_edge_tax", type=float, default=None)
+    parser.add_argument("--grad_accum_steps", type=int, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--total_steps", type=int, default=None)
@@ -79,6 +81,8 @@ def read_options():
         "gwm_text_cache_device": "cpu",
         "embedding_cache_device": "cpu",
         "action_scoring_chunk_size": 1,
+        "virtual_edge_tax": 0.03,
+        "grad_accum_steps": 1,
     }
 
     cfg = {**defaults, **loaded}
