@@ -37,6 +37,7 @@ def read_options():
     parser.add_argument("--action_scoring_chunk_size", type=int, default=None)
     parser.add_argument("--virtual_edge_tax", type=float, default=None)
     parser.add_argument("--grad_accum_steps", type=int, default=None)
+    parser.add_argument("--clean_export_top_k", type=int, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--total_steps", type=int, default=None)
@@ -83,6 +84,7 @@ def read_options():
         "action_scoring_chunk_size": 1,
         "virtual_edge_tax": 0.03,
         "grad_accum_steps": 1,
+        "clean_export_top_k": 10,
     }
 
     cfg = {**defaults, **loaded}

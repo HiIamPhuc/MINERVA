@@ -6,10 +6,8 @@ import time
 import os
 import numpy as np
 import torch
-import codecs
 from collections import defaultdict
 import gc
-import resource
 from scipy.special import logsumexp as lse
 import sys
 
@@ -18,6 +16,7 @@ from options import read_options
 from environment import Environment
 from baseline import ReactiveBaseline
 from nell_eval import nell_eval
+from logging import RunLogger
 try:
     from ..gwm.model import GWM
 except ImportError:
@@ -46,6 +45,7 @@ class Trainer(object):
         self.id2relation = self.train_environment.grapher.id2relation
         self.id2entity = self.train_environment.grapher.id2entity
         self.scores_file = os.path.join(self.output_dir, "scores.txt")
+        self.run_logger = RunLogger(scores_file=self.scores_file, output_dir=self.output_dir)
 
         self.max_hits_at_10 = 0
         
@@ -58,6 +58,7 @@ class Trainer(object):
         self.optimizer = torch.optim.Adam(trainable_params, lr=self.learning_rate)
         self.grad_accum_steps = max(1, int(getattr(self, "grad_accum_steps", 1)))
         self.optimizer_step_counter = 0
+        self.clean_export_top_k = max(1, int(getattr(self, "clean_export_top_k", 10)))
 
     def _save_checkpoint(self):
         save_path = os.path.join(self.model_dir, "model.pt")
@@ -188,38 +189,31 @@ class Trainer(object):
             remaining_steps = max(self.total_steps - self.batch_counter, 0)
             progress_pct = 100.0 * self.batch_counter / max(self.total_steps, 1)
 
-            print(
-                "step {0:4d}/{1:4d} ({2:6.2f}%), remaining {3:4d}, "
-                "num_hits: {4:7.4f}, avg. reward per batch {5:7.4f}, "
-                "exact_hit_rate {6:7.4f}, soft_hit_rate {7:7.4f}, "
-                "exact_ep_correct {8:4d}, soft_ep_correct {9:4d}, "
-                "avg_soft_ep_correct {10:7.4f}, train loss {11:7.4f}, opt_steps {12:4d}".format(
-                    self.batch_counter,
-                    self.total_steps,
-                    progress_pct,
-                    remaining_steps,
-                    np.sum(rewards),
-                    avg_reward,
-                    exact_hit_rate,
-                    soft_hit_rate,
-                    exact_ep_correct,
-                    soft_ep_correct,
-                    (soft_ep_correct / self.batch_size),
-                    train_loss,
-                    self.optimizer_step_counter,
-                )
+            self.run_logger.log_train_step(
+                step=self.batch_counter,
+                total_steps=self.total_steps,
+                progress_pct=progress_pct,
+                remaining_steps=remaining_steps,
+                num_hits=np.sum(rewards),
+                avg_reward=avg_reward,
+                exact_hit_rate=exact_hit_rate,
+                soft_hit_rate=soft_hit_rate,
+                exact_ep_correct=exact_ep_correct,
+                soft_ep_correct=soft_ep_correct,
+                avg_soft_ep_correct=(soft_ep_correct / self.batch_size),
+                train_loss=train_loss,
+                optimizer_steps=self.optimizer_step_counter,
             )
 
             if self.batch_counter % self.eval_interval == 0:
-                with open(self.scores_file, "a", encoding="utf-8") as score_file:
-                    score_file.write("Score for step " + str(self.batch_counter) + "\n\n")
+                self.run_logger.write_score_header(self.batch_counter)
 
                 os.makedirs(self.path_logger_file + "/" + str(self.batch_counter), exist_ok=True)
                 self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
 
+                self.run_logger.log_eval_start(self.batch_counter)
                 self.test(beam=True, print_paths=False)
-
-            print("Memory usage: %s (kb)" % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+                self.run_logger.log_eval_end(self.batch_counter)
 
             gc.collect()
             if self.batch_counter >= self.total_steps:
@@ -228,15 +222,23 @@ class Trainer(object):
     def test(self, beam=False, print_paths=False, save_model=True):
         self.agent.eval()
 
+        self.run_logger.log_eval_config(
+            beam=beam,
+            path_length=self.path_length,
+            test_rollouts=self.test_rollouts,
+            total_examples=self.test_environment.total_no_examples,
+        )
+
         batch_counter = 0
         paths = defaultdict(list)
         answers = []
+        clean_export_blocks = []
         metrics = {"Hits@1": 0.0, "Hits@3": 0.0, "Hits@5": 0.0, "Hits@10": 0.0, "Hits@20": 0.0, "mrr": 0.0, "auc": 0.0}
 
         total_examples = self.test_environment.total_no_examples
 
         with torch.no_grad():
-            for episode in tqdm(self.test_environment.get_episodes()):
+            for episode in tqdm(self.test_environment.get_episodes(), desc="Evaluating"):
                 batch_counter += 1
 
                 temp_batch_size = episode.no_examples
@@ -380,38 +382,46 @@ class Trainer(object):
                         metrics["mrr"] += 1.0 / (answer_pos + 1)
 
                     if print_paths:
-                        query_relation_val = self.train_environment.grapher.id2relation[self.query_relation[b * self.test_rollouts]]
-                        start_e = self.id2entity[episode.start_entities[b * self.test_rollouts]]
-                        end_e = self.id2entity[episode.end_entities[b * self.test_rollouts]]
-                        paths[str(query_relation_val)].append(str(start_e) + "\t" + str(end_e) + "\n")
-                        paths[str(query_relation_val)].append(
-                            "Reward:" + str(1 if answer_pos is not None and answer_pos < 10 else 0) + "\n"
+                        query_relation_id = int(self.query_relation[b * self.test_rollouts])
+                        query_relation_val = self.run_logger._safe_lookup(self.id2relation, query_relation_id)
+                        start_e_id = int(episode.start_entities[b * self.test_rollouts])
+                        end_e_id = int(episode.end_entities[b * self.test_rollouts])
+                        start_e = self.run_logger._safe_lookup(self.id2entity, start_e_id)
+                        end_e = self.run_logger._safe_lookup(self.id2entity, end_e_id)
+
+                        self.run_logger.append_verbose_query_block(
+                            paths=paths,
+                            answers=answers,
+                            query_relation_name=query_relation_val,
+                            start_entity_name=start_e,
+                            end_entity_name=end_e,
+                            sorted_indices_row=sorted_indx[b],
+                            query_batch_index=b,
+                            test_rollouts=self.test_rollouts,
+                            rewards=rewards,
+                            positive_reward=self.positive_reward,
+                            se=se,
+                            ce=ce,
+                            log_probs=self.log_probs,
+                            entity_trajectory=self.entity_trajectory,
+                            relation_trajectory=self.relation_trajectory,
+                            id2entity=self.id2entity,
+                            id2relation=self.id2relation,
+                            answer_pos=answer_pos,
                         )
-                        for r in sorted_indx[b]:
-                            indx = b * self.test_rollouts + r
-                            if rewards[indx] == self.positive_reward:
-                                rev = 1
-                            else:
-                                rev = -1
-                            answers.append(
-                                self.id2entity[se[b, r]]
-                                + "\t"
-                                + self.id2entity[ce[b, r]]
-                                + "\t"
-                                + str(self.log_probs[b, r])
-                                + "\n"
-                            )
-                            paths[str(query_relation_val)].append(
-                                "\t".join([str(self.id2entity[e[indx]]) for e in self.entity_trajectory])
-                                + "\n"
-                                + "\t".join([str(self.id2relation[re[indx]]) for re in self.relation_trajectory])
-                                + "\n"
-                                + str(rev)
-                                + "\n"
-                                + str(self.log_probs[b, r])
-                                + "\n___\n"
-                            )
-                        paths[str(query_relation_val)].append("#####################\n")
+
+                        self.run_logger.append_clean_summary_block(
+                            clean_export_blocks=clean_export_blocks,
+                            query_relation_name=query_relation_val,
+                            start_entity_id=start_e_id,
+                            end_entity_id=end_e_id,
+                            answer_pos=answer_pos,
+                            sorted_indices_row=sorted_indx[b],
+                            ce_row=ce[b],
+                            log_probs_row=self.log_probs[b],
+                            top_k=self.clean_export_top_k,
+                            id2entity=self.id2entity,
+                        )
 
         for metric_name in metrics:
             metrics[metric_name] /= total_examples
@@ -422,22 +432,11 @@ class Trainer(object):
                 self.save_path = self._save_checkpoint()
 
         if print_paths:
-            print("[ printing paths at {} ]".format(self.output_dir + "/test_beam/"))
-            for q in paths:
-                j = q.replace("/", "-")
-                with codecs.open(self.path_logger_file_ + "_" + j, "a", "utf-8") as pos_file:
-                    for p in paths[q]:
-                        pos_file.write(p)
-            with open(self.path_logger_file_ + "answers", "w") as answer_file:
-                for a in answers:
-                    answer_file.write(a)
+            self.run_logger.export_raw_paths(self.path_logger_file_, paths, answers)
+            self.run_logger.export_clean_summary(self.path_logger_file_, clean_export_blocks)
 
-        with open(self.scores_file, "a", encoding="utf-8") as score_file:
-            for key, value in metrics.items():
-                metric_line = "{0}: {1:7.4f}".format(key, value)
-                print(metric_line)
-                score_file.write(metric_line + "\n")
-            score_file.write("\n")
+        self.run_logger.write_metrics(metrics)
+        self.run_logger.log_eval_completed()
 
     # Cleaned up redundant top_k in favor of torch.topk natively
     # def top_k(self, scores, k):
@@ -508,10 +507,9 @@ if __name__ == "__main__":
     
     test_trainer.test_rollouts = 100
 
-    os.makedirs(path_logger_file + "/" + "test_beam", exist_ok=True)
-    test_trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
-    with open(test_trainer.scores_file, "a", encoding="utf-8") as score_file:
-        score_file.write("Test (beam) scores with best model from " + str(save_path) + "\n")
+    os.makedirs(path_logger_file + "/" + "test", exist_ok=True)
+    test_trainer.path_logger_file_ = path_logger_file + "/" + "test" + "/paths"
+    test_trainer.run_logger.append_lines(["Test (beam) scores with best model from {}".format(save_path)])
     test_trainer.test_environment = test_trainer.test_test_environment
     test_trainer.test_environment.test_rollouts = 100
 
@@ -519,4 +517,4 @@ if __name__ == "__main__":
 
     print("NELL evaluation flag:", options["nell_evaluation"])
     if options["nell_evaluation"] == 1:
-        nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers", test_trainer.data_dir + "/sort_test.pairs")
+        nell_eval(path_logger_file + "/" + "test/" + "pathsanswers", test_trainer.data_dir + "/sort_test.pairs")

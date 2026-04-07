@@ -11,6 +11,7 @@ embedding_cache_device: "cpu"
 action_scoring_chunk_size: 1
 virtual_edge_tax: 0.07
 grad_accum_steps: 4
+clean_export_top_k: 10
 
 max_actions: 100
 path_length: 3
@@ -19,7 +20,7 @@ batch_size: 16
 num_rollouts: 10
 test_rollouts: 100
 
-hidden_size: 256
+hidden_size: 1024
 num_lstm_layers: 1
 
 learning_rate: 0.001
