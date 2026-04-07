@@ -1,6 +1,5 @@
 import os
 
-
 class RunLogger:
     def __init__(self, scores_file, output_dir):
         self.scores_file = scores_file

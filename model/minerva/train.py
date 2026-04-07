@@ -16,7 +16,7 @@ from options import read_options
 from environment import Environment
 from baseline import ReactiveBaseline
 from nell_eval import nell_eval
-from logging import RunLogger
+from run_logging import RunLogger
 try:
     from ..gwm.model import GWM
 except ImportError:
