@@ -9,19 +9,19 @@ hallucinate_k: 3
 gwm_text_cache_device: "cpu"
 embedding_cache_device: "cpu"
 action_scoring_chunk_size: 1
-virtual_edge_tax: 0.07
+virtual_edge_tax: 0.03
 grad_accum_steps: 4
 clean_export_top_k: 10
 
 max_actions: 100
 path_length: 3
-total_steps: 5000
+total_steps: 2000
 batch_size: 16
-num_rollouts: 10
+num_rollouts: 20
 test_rollouts: 100
 
 hidden_size: 1024
-num_lstm_layers: 1
+num_lstm_layers: 2
 
 learning_rate: 0.001
 grad_clip_norm: 5
