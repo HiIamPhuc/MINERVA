@@ -99,8 +99,7 @@ def read_options():
         parser.error("data_dir must be provided in YAML or via --data_dir")
 
     if not cfg.get("output_dir"):
-        run_name = "minerva_" + str(uuid.uuid4())[:8]
-        cfg["output_dir"] = os.path.join(cfg["log_dir"], run_name)
+        cfg["output_dir"] = cfg["log_dir"]
 
     cfg["model_dir"] = os.path.join(cfg["output_dir"], "model")
     cfg["path_logger_file"] = cfg["output_dir"]
