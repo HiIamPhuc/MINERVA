@@ -5,7 +5,7 @@ output_dir: ""
 log_dir: "./output"
 
 gwm_model_path: ""
-hallucinate_k: 3
+hallucinate_k: 2
 gwm_text_cache_device: "cpu"
 embedding_cache_device: "cpu"
 action_scoring_chunk_size: 1
@@ -20,8 +20,8 @@ batch_size: 16
 num_rollouts: 20
 test_rollouts: 100
 
-hidden_size: 1024
-num_lstm_layers: 2
+hidden_size: 512
+num_lstm_layers: 1
 
 learning_rate: 0.001
 grad_clip_norm: 5
