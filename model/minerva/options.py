@@ -38,6 +38,9 @@ def read_options():
     parser.add_argument("--virtual_edge_tax", type=float, default=None)
     parser.add_argument("--grad_accum_steps", type=int, default=None)
     parser.add_argument("--clean_export_top_k", type=int, default=None)
+    parser.add_argument("--soft_reward_threshold", type=float, default=None)
+    parser.add_argument("--soft_reward_power", type=float, default=None)
+    parser.add_argument("--soft_reward_cap", type=float, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--total_steps", type=int, default=None)
@@ -85,6 +88,9 @@ def read_options():
         "virtual_edge_tax": 0.03,
         "grad_accum_steps": 1,
         "clean_export_top_k": 10,
+        "soft_reward_threshold": 0.90,
+        "soft_reward_power": 4.0,
+        "soft_reward_cap": 0.20,
     }
 
     cfg = {**defaults, **loaded}

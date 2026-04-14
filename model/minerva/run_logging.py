@@ -128,6 +128,7 @@ class RunLogger:
         log_probs,
         entity_trajectory,
         relation_trajectory,
+        action_type_trajectory,
         id2entity,
         id2relation,
         answer_pos,
@@ -152,11 +153,15 @@ class RunLogger:
 
             entity_trace = "\t".join([self._safe_lookup(id2entity, e[global_index]) for e in entity_trajectory])
             relation_trace = "\t".join([self._safe_lookup(id2relation, re[global_index]) for re in relation_trajectory])
+            action_type_trace = "\t".join([str(step_types[global_index]) for step_types in action_type_trajectory])
 
             paths[str(query_relation_name)].append(
                 entity_trace
                 + "\n"
                 + relation_trace
+                + "\n"
+                + "Hop Types: "
+                + action_type_trace
                 + "\n"
                 + str(rev)
                 + "\n"

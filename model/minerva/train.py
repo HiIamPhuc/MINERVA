@@ -258,6 +258,7 @@ class Trainer(object):
                 if print_paths:
                     self.entity_trajectory = []
                     self.relation_trajectory = []
+                    self.action_type_trajectory = []
 
                 self.log_probs = np.zeros((batch_total,)) * 1.0
 
@@ -265,6 +266,7 @@ class Trainer(object):
                     next_relations_t = torch.tensor(state["next_relations"], dtype=torch.long, device=self.device)
                     next_entities_t = torch.tensor(state["next_entities"], dtype=torch.long, device=self.device)
                     current_entities_t = torch.tensor(state["current_entities"], dtype=torch.long, device=self.device)
+                    physical_action_count = min(int(self.max_actions), int(next_relations_t.size(1)))
                     virtual_action_mask = self._build_virtual_action_mask(
                         action_dim=next_relations_t.size(1),
                         batch_total=batch_total,
@@ -285,6 +287,7 @@ class Trainer(object):
                     test_scores = test_scores_t.detach().cpu().numpy()
                     test_action_idx = test_action_idx_t.detach().cpu().numpy()
                     chosen_relation = chosen_relation_t.detach().cpu().numpy()
+                    action_types = np.where(test_action_idx >= physical_action_count, "V", "P")
 
                     if beam:
                         k = self.test_rollouts
@@ -313,18 +316,21 @@ class Trainer(object):
 
                         test_action_idx = x
                         chosen_relation = state["next_relations"][np.arange(temp_batch_size * k), x]
+                        action_types = np.where(test_action_idx >= physical_action_count, "V", "P")
                         beam_probs = new_scores[y, x]
                         beam_probs = beam_probs.reshape((-1, 1))
                         if print_paths:
                             for j in range(i):
                                 self.entity_trajectory[j] = self.entity_trajectory[j][y]
                                 self.relation_trajectory[j] = self.relation_trajectory[j][y]
+                                self.action_type_trajectory[j] = self.action_type_trajectory[j][y]
 
                     previous_relation = torch.tensor(chosen_relation, dtype=torch.long, device=self.device)
 
                     if print_paths:
                         self.entity_trajectory.append(state["current_entities"])
                         self.relation_trajectory.append(chosen_relation)
+                        self.action_type_trajectory.append(action_types)
 
                     state = episode(test_action_idx)
                     self.log_probs += test_scores[np.arange(self.log_probs.shape[0]), test_action_idx]
@@ -405,6 +411,7 @@ class Trainer(object):
                             log_probs=self.log_probs,
                             entity_trajectory=self.entity_trajectory,
                             relation_trajectory=self.relation_trajectory,
+                            action_type_trajectory=self.action_type_trajectory,
                             id2entity=self.id2entity,
                             id2relation=self.id2relation,
                             answer_pos=answer_pos,

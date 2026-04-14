@@ -12,6 +12,9 @@ action_scoring_chunk_size: 1
 virtual_edge_tax: 0.03
 grad_accum_steps: 4
 clean_export_top_k: 10
+soft_reward_threshold: 0.90
+soft_reward_power: 4.0
+soft_reward_cap: 0.20
 
 max_actions: 100
 path_length: 3

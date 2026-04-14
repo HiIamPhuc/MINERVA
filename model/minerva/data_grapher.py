@@ -48,12 +48,16 @@ class RelationEntityGrapher:
         del self.adjacency_list
         self.adjacency_list = None
 
-    def return_next_actions(self, current_entities, start_entities, query_relations, answers, all_correct_answers, last_step, rollouts, gwm_model=None, k=3):
+    def return_next_actions(self, current_entities, start_entities, query_relations, answers, all_correct_answers, last_step, rollouts, gwm_model=None, k=3, current_hop=0):
         ret = self.action_space[current_entities, :, :].copy()
+        physical_action_count = ret.shape[1]
         
-        if gwm_model is not None and hasattr(gwm_model, 'predict_latent_jumps'):
+        # Hallucinated jumps are only valid at hop 0 for this single-hop GWM.
+        if current_hop == 0 and gwm_model is not None and hasattr(gwm_model, 'predict_latent_jumps'):
             batch_sz = current_entities.shape[0]
-            virtual_edges = np.zeros((batch_sz, k, 2), dtype=np.dtype('int32'))
+            virtual_edges = np.ones((batch_sz, k, 2), dtype=np.dtype('int32'))
+            virtual_edges[:, :, 0] *= self.ePAD
+            virtual_edges[:, :, 1] *= self.rPAD
             
             try:
                 virtual_entities = gwm_model.predict_latent_jumps(current_entities, query_relations, k=k)
@@ -77,11 +81,12 @@ class RelationEntityGrapher:
 
         for i in range(current_entities.shape[0]):
             if current_entities[i] == start_entities[i]:
-                relations = ret[i, :, 1]
-                entities = ret[i, :, 0]
+                # Anti-cheat filter should only apply to physical actions, not virtual jumps.
+                relations = ret[i, :physical_action_count, 1]
+                entities = ret[i, :physical_action_count, 0]
                 mask = np.logical_and(relations == query_relations[i] , entities == answers[i])
-                ret[i, :, 0][mask] = self.ePAD
-                ret[i, :, 1][mask] = self.rPAD
+                ret[i, :physical_action_count, 0][mask] = self.ePAD
+                ret[i, :physical_action_count, 1][mask] = self.rPAD
             if last_step:
                 entities = ret[i, :, 0]
                 relations = ret[i, :, 1]

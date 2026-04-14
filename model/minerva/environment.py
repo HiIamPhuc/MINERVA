@@ -14,7 +14,7 @@ class Episode(object):
             self.path_len, num_rollouts, test_rollouts, \
             positive_reward, negative_reward, \
             mode, batcher, \
-            self.gwm_model, self.hallucinate_k = params
+            self.gwm_model, self.hallucinate_k, self.soft_reward_threshold, self.soft_reward_power, self.soft_reward_cap = params
         
         self.mode = mode
         self.num_rollouts = num_rollouts if self.mode == 'train' else test_rollouts
@@ -35,7 +35,7 @@ class Episode(object):
     def _update_state(self):
         next_actions = self.grapher.return_next_actions(self.current_entities, self.start_entities, self.query_relation,
                                                         self.end_entities, self.all_answers, self.current_hop == self.path_len - 1,
-                                                        self.num_rollouts, self.gwm_model, self.hallucinate_k)
+                                                        self.num_rollouts, self.gwm_model, self.hallucinate_k, self.current_hop)
         self.state['next_relations'] = next_actions[:, :, 1]
         self.state['next_entities'] = next_actions[:, :, 0]
         self.state['current_entities'] = self.current_entities
@@ -81,11 +81,14 @@ class Episode(object):
                     
                     sim = (curr_emb * end_emb).sum(dim=-1).cpu().numpy()
                     
-                    # 1. Only reward if similarity is greater than 0.75 (ignore loose semantic matches)
-                    sim = np.maximum(0, sim - 0.75) / 0.25 # Scales [0.75, 1.0] to[0.0, 1.0]
-                    
-                    # 2. Square it to make the agent hungry for the EXACT answer
-                    soft_reward = np.power(sim, 3.0)
+                    # Keep soft reward as sparse shaping only.
+                    sim = np.clip(sim, -1.0, 1.0)
+                    denom = max(1e-6, 1.0 - float(self.soft_reward_threshold))
+                    sim = np.maximum(0.0, sim - float(self.soft_reward_threshold)) / denom
+
+                    soft_reward = np.power(sim, float(self.soft_reward_power))
+                    reward_span = float(self.positive_reward - self.negative_reward)
+                    soft_reward = float(self.negative_reward) + reward_span * float(self.soft_reward_cap) * soft_reward
                     
                     # Zero out padding elements
                     soft_reward[mask_curr.numpy()] = self.negative_reward
@@ -130,9 +133,12 @@ class Environment(object):
         self.gwm_model = params.get('gwm_model', None)
         assert self.gwm_model is not None, "GWM Model must be provided for DreamWalker-KG."
         self.hallucinate_k = params.get('hallucinate_k', 3)
+        self.soft_reward_threshold = float(params.get('soft_reward_threshold', 0.90))
+        self.soft_reward_power = float(params.get('soft_reward_power', 4.0))
+        self.soft_reward_cap = float(params.get('soft_reward_cap', 0.20))
 
     def get_episodes(self):
-        params = self.batch_size, self.path_len, self.num_rollouts, self.test_rollouts, self.positive_reward, self.negative_reward, self.mode, self.batcher, self.gwm_model, self.hallucinate_k
+        params = self.batch_size, self.path_len, self.num_rollouts, self.test_rollouts, self.positive_reward, self.negative_reward, self.mode, self.batcher, self.gwm_model, self.hallucinate_k, self.soft_reward_threshold, self.soft_reward_power, self.soft_reward_cap
         if self.mode == 'train':
             for data in self.batcher.yield_next_batch_train():
 
