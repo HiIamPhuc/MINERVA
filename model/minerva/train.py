@@ -73,9 +73,13 @@ class Trainer(object):
         return save_path
 
     def entropy_reg_loss(self, all_logits):
-        all_logits = torch.stack(all_logits, dim=2)  # [B, MAX_NUM_ACTIONS, T]
-        entropy_policy = -torch.mean(torch.sum(torch.exp(all_logits) * all_logits, dim=1))
-        return entropy_policy
+        # Action space can vary by hop (e.g., hop-0 adds virtual actions only),
+        # so compute entropy per hop and average instead of stacking by action dim.
+        per_step_entropy = []
+        for step_logits in all_logits:  # each: [B, A_t] log-probabilities
+            step_entropy = -torch.mean(torch.sum(torch.exp(step_logits) * step_logits, dim=1))
+            per_step_entropy.append(step_entropy)
+        return torch.mean(torch.stack(per_step_entropy))
 
     def calc_reinforce_loss(self, per_example_loss, per_example_logits, cum_discounted_reward):
         loss = torch.stack(per_example_loss, dim=1)  # [B, T]
